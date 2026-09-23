@@ -1,0 +1,40 @@
+# PDF转换器 - 安装依赖
+
+本工具需要以下Python包：
+
+## 必需依赖
+
+```bash
+pip install pymupdf pdfplumber python-docx openpyxl Pillow pdf2docx
+```
+
+## 可选依赖（OCR功能）
+
+如需处理扫描版PDF，请安装：
+
+```bash
+# Windows
+pip install pytesseract
+
+# 同时需要安装Tesseract OCR引擎
+# 下载地址: https://github.com/UB-Mannheim/tesseract/wiki
+```
+
+## LibreOffice
+
+用于Word/Excel转PDF功能，请确保已安装：
+
+- **Windows**: 下载并安装 [LibreOffice](https://www.libreoffice.org/download/)
+- **Linux**: `sudo apt-get install libreoffice`
+- **macOS**: `brew install --cask libreoffice`
+
+## 验证安装
+
+```bash
+python scripts/detect_pdf_type.py --help
+python scripts/pdf_to_word.py --help
+python scripts/pdf_to_excel.py --help
+python scripts/doc_to_pdf.py --help
+python scripts/excel_to_pdf.py --help
+python scripts/converter.py --help
+```
