@@ -31,7 +31,7 @@ a = Analysis(
         ('pdf-converter/scripts/license_checker.py', 'scripts'),
         ('pdf-converter/scripts/ed25519.py', 'scripts'),
         ('licensing/scripts/get_machine_code.py', 'scripts'),
-        ('licensing/scripts/generate_license.py', 'scripts'),
+        ('licensing/scripts/license_verify.py', 'scripts'),
         ('licensing/scripts/verify_license.py', 'scripts'),
         ('licensing/scripts/register.py', 'scripts'),
     ],
@@ -42,7 +42,7 @@ a = Analysis(
         'docx',
         'openpyxl',
         'PIL',
-        'generate_license',
+        'license_verify',
         'verify_license',
         'get_machine_code',
         'register',
@@ -105,39 +105,3 @@ exe_single = EXE(
     icon=None,
 )
 
-# 许可码生成工具
-a_license = Analysis(
-    [os.path.join(_base_dir, 'licensing', 'scripts', 'generate_license.py')],
-    pathex=[_base_dir],
-    binaries=[],
-    datas=[('licensing/scripts/ed25519.py', '.')],
-    hiddenimports=['ed25519'],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False,
-)
-
-exe_license = EXE(
-    a_license.pure,
-    a_license.scripts,
-    a_license.binaries,
-    a_license.zipfiles,
-    a_license.datas,
-    [],
-    name='LicenseGenerator',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=True,
-    windowed=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=None,
-)

@@ -25,10 +25,10 @@ PDFConverterAdd/           # 仓库根目录
 │   ├── USAGE.md             # 详细使用指南
 │   └── requirements.txt     # Python依赖
 │
-├── licensing/               # 注册许可系统
+├── licensing/               # 注册许可系统（只含验签，发码工具在仓库外）
 │   ├── scripts/
 │   │   ├── get_machine_code.py  # 机器码提取
-│   │   ├── generate_license.py  # 许可码生成
+│   │   ├── license_verify.py    # 许可码验签（只读，只有公钥）
 │   │   ├── verify_license.py    # 许可码验证
 │   │   └── register.py        # 注册管理
 │   └── README.md            # 注册系统说明
@@ -100,8 +100,8 @@ python converter.py --input document.pdf --auto
       ↓
   发送给开发者
       ↓
-开发者侧：
-  generate_license.py → 生成许可码
+开发者侧（在仓库外的发码工具里，与私钥同目录）：
+  发码工具 → 生成许可码
       ↓
   发送给用户
       ↓
@@ -207,12 +207,12 @@ PDF转换器 - 注册状态
 
 ### 修改许可规则
 
-修改 `licensing/scripts/generate_license.py` 中的常量：
-- `MAX_FILE_LIMIT` - 文件限制
-- `PUBLIC_KEY_HEX` - 验签公钥（**可以公开**；签名私钥不在仓库里，只留在开发者本机）
+修改 `licensing/scripts/license_verify.py` 中的常量：
+- `MAX_FILE_LIMIT` - 文件限制（客户端配额默认值同步见 `license_checker.py`、`converter_gui.py`）
+- `PUBLIC_KEY_HEX` - 验签公钥（**可以公开**；签名私钥不在仓库里，只在仓库外的发码端）
 
-> 许可码用 Ed25519 非对称签名。程序内只放公钥，因此改程序也造不出有效许可码；
-> 私钥的存放位置见 `licensing/README.md`。
+> 许可码用 Ed25519 非对称签名。本仓库只放公钥，因此改程序也造不出有效许可码；
+> 发码工具与私钥的存放位置见 `licensing/README.md`。
 
 ## 许可证
 

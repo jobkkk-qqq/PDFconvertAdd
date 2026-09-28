@@ -55,14 +55,9 @@ def main():
         run_command("pip install pyinstaller", "安装PyInstaller")
 
     # 打包PDF转换器
-    print("\n[1/2] 打包PDF转换器...")
+    print("\n[1/1] 打包PDF转换器...")
     cmd1 = f'pyinstaller --onefile --console --name PDFConverter --distpath "{dist_dir}" --workpath "{os.path.join(dist_dir, "build")}" "pdf-converter/scripts/converter.py"'
     success1 = run_command(cmd1, "打包PDF转换器")
-
-    # 打包许可码生成工具
-    print("\n[2/2] 打包许可码生成工具...")
-    cmd2 = f'pyinstaller --onefile --console --name LicenseGenerator --distpath "{dist_dir}" --workpath "{os.path.join(dist_dir, "build_license")}" "licensing/scripts/generate_license.py"'
-    success2 = run_command(cmd2, "打包许可码生成工具")
 
     # 复制辅助脚本到dist目录
     print("\n复制辅助文件...")
@@ -79,6 +74,7 @@ def main():
         ('pdf-converter/scripts/ed25519.py', 'ed25519.py'),
         ('licensing/scripts/get_machine_code.py', 'get_machine_code.py'),
         ('licensing/scripts/verify_license.py', 'verify_license.py'),
+        ('licensing/scripts/license_verify.py', 'license_verify.py'),
         ('licensing/scripts/register.py', 'register.py'),
     ]
 
@@ -117,11 +113,7 @@ echo ============================================
 echo   PDF转换器 v1.0
 echo ============================================
 echo.
-if "%1"=="license" (
-    "%~dp0LicenseGenerator.exe" %2 %3 %4 %5 %6 %7 %8 %9
-) else (
-    "%~dp0PDFConverter.exe" %*
-)
+"%~dp0PDFConverter.exe" %*
 pause
 '''
     startup_path = os.path.join(dist_dir, '启动PDF转换器.bat')
@@ -136,9 +128,8 @@ pause
     print(f"\n输出目录: {dist_dir}")
     print()
 
-    if success1 and success2:
+    if success1:
         print("  ✓ PDF转换器: PDFConverter.exe")
-        print("  ✓ 许可码生成器: LicenseGenerator.exe")
         print("  ✓ 辅助脚本: scripts/ 目录")
         print("  ✓ 启动脚本: 启动PDF转换器.bat")
         print()

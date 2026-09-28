@@ -61,15 +61,14 @@ PDFconvertAdd/
 │   ├── README.md / USAGE.md / SKILL.md
 │   └── requirements.txt
 │
-├── licensing/                # 注册许可系统
+├── licensing/                # 注册许可系统（只含验签，不含发码）
 │   ├── scripts/
 │   │   ├── get_machine_code.py      # 机器码提取（用户端）
-│   │   ├── generate_license.py      # 许可码生成 / 验证（开发者端，需私钥）
-│   │   ├── license_generator_gui.py # 许可码生成器 GUI
-│   │   ├── verify_license.py        # 许可码验证
+│   │   ├── license_verify.py        # 许可码验签（只读，只有公钥）
+│   │   ├── verify_license.py        # 许可码验证工具
 │   │   ├── register.py              # 注册管理
-│   │   └── ed25519.py               # 纯标准库 Ed25519 实现
-│   └── README.md             # 注册系统说明（含私钥存放位置）
+│   │   └── ed25519.py               # 纯标准库 Ed25519 实现（验签用）
+│   └── README.md             # 注册系统说明（发码工具在仓库外）
 │
 ├── inv-print/                # 发票打印独立小工具 InvPrint
 ├── PROJECT.md                # 项目总览
@@ -147,18 +146,18 @@ PDF - XXXXXXXX - NNNN - <Base32 签名>
 ```
 
 - **程序内只内置公钥**：它只能验签，**无法生成**许可码——所以即使程序与源码完全公开，也造不出有效码
-- **私钥只在开发者本机**，不随仓库分发、不打进 exe；查找顺序见 [`licensing/README.md`](licensing/README.md)
+- **发码工具与私钥都在本仓库之外**（默认 `<仓库根>/../license-keys/`），不随仓库分发、不打进 exe
 - **配额**：每个许可最多转换 20 个文件，用满后用序列号更大的新码续期
 - ⚠️ **2.0.0 起旧格式许可码全部失效**（旧版用对称 HMAC，密钥随程序分发，等于把发码器交给了每个用户）
 
-开发者的完整工作流见 [`REGISTRATION_GUIDE.md`](REGISTRATION_GUIDE.md)。
+开发者的完整工作流见 [`REGISTRATION_GUIDE.md`](REGISTRATION_GUIDE.md)，私钥与发码工具位置见 [`licensing/README.md`](licensing/README.md)。
 
 ## 打包
 
 ```bash
 pip install pyinstaller
 pyinstaller --noconfirm PDFConverter_gui.spec      # GUI 版 → dist/PDFConverter_gui/
-python build_gui.py                                # 一条命令出客户程序 + 发码工具
+python build_gui.py                                # 一条命令出客户端 + scripts/ 辅助脚本
 ```
 
 各 spec 用途：
@@ -167,19 +166,10 @@ python build_gui.py                                # 一条命令出客户程序
 |------|------|
 | `PDFConverter_gui.spec` | GUI 版（推荐分发） |
 | `PDFConverter.spec` | 命令行版 |
-| `LicenseGenerator.spec` | 发码工具 GUI 版 → `dist/LicenseGenerator.exe`（开发者自用） |
+| `build_gui_spec.spec` | 当前 `build_gui.py` 使用的 GUI 打包配置（onedir → `dist/PDFConverter_gui/`） |
 
-发码工具（开发者自用，**不要发给客户**）：
-
-| 产物 | 说明 |
-|------|------|
-| `dist/LicenseGenerator.exe` | 图形界面发码：粘贴机器码 → 生成并自动复制许可码 |
-| `dist/LicenseGenerator-cli.exe` | 命令行发码：`LicenseGenerator-cli.exe <机器码> [序列号]` |
-
-> exe 里**不含私钥**，签发时按顺序查找：`LICENSE_PRIVATE_KEY` 环境变量 →
-> exe 同级目录及其上级目录下的 `license-private-key.json` 或 `license-keys/license-private-key.json`
-> → `~/.license-keys/private-key.json`。私钥按约定放在仓库上一级的 `license-keys/` 目录，
-> exe 放在 `dist/` 时能自动找到；若把 exe 挪到别处，请一并带上私钥或用环境变量指定。
+> 本仓库**不打包发码工具**。发码工具的源码与打包脚本都在仓库外（与私钥同目录），
+> 用法是在那边执行它自己的 `make-license.bat` 或直接运行打包好的 `LicenseGenerator.exe`。
 
 ## 文档
 

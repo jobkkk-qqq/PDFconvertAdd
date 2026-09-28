@@ -44,28 +44,10 @@ def main():
     print(f"工作目录: {base_dir}")
     print(f"输出目录: {dist_dir}")
 
-    # 打包GUI版本
-    print("\n[1/2] 打包GUI版本...")
+    # 打包GUI版本（发码工具不在本仓库，见仓库外的 license-keys/）
+    print("\n[1/1] 打包GUI版本...")
     cmd1 = 'pyinstaller --noconfirm --clean "build_gui_spec.spec"'
     success1 = run_command(cmd1, "打包PDF转换器GUI版本")
-
-    # 打包许可码生成工具（开发者自用，必须带私钥才能发码）
-    print("\n[2/3] 打包许可码生成工具（GUI 版）...")
-    work_license = os.path.join(dist_dir, "build_license")
-    cmd2 = (
-        f'pyinstaller --noconfirm --clean --onefile --windowed --name LicenseGenerator '
-        f'--distpath "{dist_dir}" --workpath "{os.path.join(work_license, "gui")}" '
-        f'--specpath "{work_license}" "licensing/scripts/license_generator_gui.py"'
-    )
-    success2 = run_command(cmd2, "打包许可码生成工具（GUI 版）")
-
-    print("\n[3/3] 打包许可码生成工具（命令行版）...")
-    cmd3 = (
-        f'pyinstaller --noconfirm --clean --onefile --console --name LicenseGenerator-cli '
-        f'--distpath "{dist_dir}" --workpath "{os.path.join(work_license, "cli")}" '
-        f'--specpath "{work_license}" "licensing/scripts/generate_license.py"'
-    )
-    success3 = run_command(cmd3, "打包许可码生成工具（命令行版）")
 
     # 整理文件（onedir 输出为 dist/PDFConverter_gui/）
     gui_ok = False
@@ -76,15 +58,6 @@ def main():
         print("  ✓ GUI版本: PDFConverter_gui/PDFConverter_gui.exe")
     else:
         print("  ✗ GUI版本打包失败，未找到 PDFConverter_gui.exe")
-
-    license_gui = os.path.join(dist_dir, 'LicenseGenerator.exe')
-    license_cli = os.path.join(dist_dir, 'LicenseGenerator-cli.exe')
-    license_ok = os.path.exists(license_gui) and os.path.exists(license_cli)
-    if license_ok:
-        print("  ✓ 许可码生成器(GUI): LicenseGenerator.exe")
-        print("  ✓ 许可码生成器(命令行): LicenseGenerator-cli.exe")
-    else:
-        print("  ✗ 许可码生成工具打包失败，未找到 LicenseGenerator.exe / LicenseGenerator-cli.exe")
 
     # 复制辅助脚本
     scripts_dir = os.path.join(dist_dir, 'scripts')
@@ -103,6 +76,7 @@ def main():
         ('pdf-converter/scripts/converter_gui.py', 'converter_gui.py'),
         ('licensing/scripts/get_machine_code.py', 'get_machine_code.py'),
         ('licensing/scripts/verify_license.py', 'verify_license.py'),
+        ('licensing/scripts/license_verify.py', 'license_verify.py'),
         ('licensing/scripts/register.py', 'register.py'),
     ]
 
@@ -149,27 +123,16 @@ pause
     print(f"\n输出目录: {dist_dir}")
     print()
 
-    overall_ok = gui_ok and license_ok
+    overall_ok = gui_ok and success1
     if overall_ok:
-        success1 = True
         print("  ✓ PDF转换器(GUI): PDFConverter_gui/PDFConverter_gui.exe")
-        print("  ✓ 许可码生成器(GUI): LicenseGenerator.exe")
-        print("  ✓ 许可码生成器(命令行): LicenseGenerator-cli.exe")
         print("  ✓ 辅助脚本: scripts/ 目录")
         print("  ✓ 启动脚本: 启动PDF转换器.bat")
         print()
-        print("发码工具需要私钥才能签发许可码（私钥不进 exe）：")
-        default_key = os.path.join(os.path.dirname(base_dir), 'license-keys', 'license-private-key.json')
-        if os.path.exists(default_key):
-            print(f"  ✓ 已找到私钥: {default_key}")
-        else:
-            print(f"  ! 未找到私钥（按约定应放在仓库上一级）: {default_key}")
-            print("    也可放到 exe 同级目录，或用 LICENSE_PRIVATE_KEY 环境变量指定")
-        print()
-        print("注意：发给客户前请把 LicenseGenerator*.exe 从 dist 移走，只发客户需要的程序。")
+        print("发码工具不在本仓库：与私钥一起放在仓库外的 license-keys/ 目录。")
     else:
-        print("  ✗ 打包过程中出现错误，请检查以上输出（GUI=%s, License=%s）"
-              % ("OK" if gui_ok else "FAIL", "OK" if (license_ok and success3) else "FAIL"))
+        print("  ✗ 打包过程中出现错误，请检查以上输出（GUI=%s）"
+              % ("OK" if gui_ok else "FAIL"))
 
     print("=" * 60)
     print()
