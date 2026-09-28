@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['pdf_page_editor', 'invoice_recognizer']
+hiddenimports = ['pdf_page_editor', 'invoice_recognizer', 'ed25519']
 tmp_ret = collect_all('tkinterdnd2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('rapidocr_onnxruntime')
