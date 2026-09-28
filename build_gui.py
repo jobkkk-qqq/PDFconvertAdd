@@ -78,6 +78,7 @@ def main():
         ('pdf-converter/scripts/doc_to_pdf.py', 'doc_to_pdf.py'),
         ('pdf-converter/scripts/excel_to_pdf.py', 'excel_to_pdf.py'),
         ('pdf-converter/scripts/license_checker.py', 'license_checker.py'),
+        ('pdf-converter/scripts/ed25519.py', 'ed25519.py'),
         ('pdf-converter/scripts/invoice_print_layout.py', 'invoice_print_layout.py'),
         ('pdf-converter/scripts/invoice_recognizer.py', 'invoice_recognizer.py'),
         ('pdf-converter/scripts/converter_gui.py', 'converter_gui.py'),

@@ -1,5 +1,10 @@
 # PDF转换器 - 注册系统使用说明
 
+> **更新（2.0.0）**：许可码已由对称 HMAC 改为 **Ed25519 非对称签名**（RFC 8032）。
+> 程序里只内置**公钥**（只能验签、造不出码），签名私钥只在开发者本机。
+> 因此**旧格式许可码全部失效**。本文档的算法、流程与数据结构已同步更新。
+> 另：旧版本"同一机器不能重复注册"的限制已放开——现在用**序列号更大**的新码即可续期。
+
 ## 项目结构
 
 ```
@@ -157,32 +162,40 @@ D:\python\pdf2pdf\
 
 ```python
 许可码格式:
-  PDF - D0609F8C - 0001 - E4F1990B
+  PDF - 56BA91C4 - 0001 - 67LTR57D6STCN4KO...（共 103 个 Base32 字符）
    │       │        │        │
-   │       │        │        └─ HMAC-SHA256签名(8位)
-   │       │        └─ 序列号(4位数字)
+   │       │        │        └─ Ed25519 签名（64 字节 → Base32，无填充）
+   │       │        └─ 序列号(4位数字)：第几次授权，续期即 +1
    │       └─ 机器码前缀(8位)
    └─ 固定前缀
 
 生成算法:
-  1. 提取机器码前8位
-  2. 格式化序列号为4位数字
-  3. 构造签名字符串: "PDF-{prefix}-{serial}"
-  4. 计算HMAC-SHA256签名
-  5. 取前8位作为校验位
-  6. 组装完整许可码
+  1. 提取机器码前 8 位
+  2. 格式化序列号为 4 位数字
+  3. 构造被签名消息: "PDF-{prefix}-{serial}"（UTF-8）
+  4. 用 Ed25519 **私钥**签名（私钥在仓库外，见 licensing/README.md）
+  5. 对 64 字节签名做 Base32 编码（去填充 → 103 字符）
+  6. 组装完整许可码（整串约 121 字符，必须完整复制）
+
+验签算法（程序内，只有公钥）:
+  1. 解析出 机器码前缀 / 序列号 / 签名
+  2. 用许可码内嵌的序列号重算被签名消息
+  3. 用内置公钥 Ed25519 验签（完整 64 字节签名，不可截断）
 ```
+
+> 注意：Ed25519 签名**不能截断**——验签需要完整的 R 与 S 各 32 字节，
+> 这就是注册码长达 121 字符的原因；用户复制粘贴即可，不要手输。
 
 ### 3. 注册验证流程 (`converter.py` → `license_checker.py`)
 
 ```python
-注册流程:
+注册 / 续期流程:
   1. 验证机器码格式 (XXXX-XXXX-XXXX-XXXX)
-  2. 验证许可码格式 (PDF-XXXXXXXX-NNNN-XXXXXXXX)
-  3. 验证许可码签名 (HMAC-SHA256)
-  4. 检查是否已注册 (比较机器码)
-  5. 保存注册信息 (~/.pdf_converter/license.json)
-  6. 初始化使用记录 (~/.pdf_converter/usage.json)
+  2. 验证许可码格式 (PDF-XXXXXXXX-NNNN-<Base32 签名>)
+  3. 验证签名 (Ed25519，用程序内置公钥)
+  4. 同机续期要求序列号**递增**（旧码不能复用）；换了机器则拒绝
+  5. 保存注册信息 (~/.pdf_converter/license.json，含 serial / max_serial)
+  6. 使用计数归零 (~/.pdf_converter/usage.json)
 
 转换流程:
   1. 检查是否已注册 (读取 license.json)
@@ -197,19 +210,20 @@ D:\python\pdf2pdf\
 
 ```
 ~/.pdf_converter/
-├── license_config.json      # 系统配置
+├── license_config.json      # 系统配置（2.0 起不再包含任何密钥）
 │   {
-│     "version": "1.0.0",
+│     "version": "2.0.0",
 │     "max_files_per_license": 20,
-│     "license_prefix": "PDF",
-│     "developer_key": "PDFConverter2026_SecretKey_v1.0"
+│     "license_prefix": "PDF"
 │   }
 │
 ├── license.json             # 注册信息
 │   {
-│     "machine_code": "D060-9F8C-3317-EC14",
-│     "license_code": "PDF-D0609F8C-0001-E4F1990B",
-│     "registered_at": "2026-08-18T11:17:45",
+│     "machine_code": "56BA-91C4-AD56-9ACA",
+│     "license_code": "PDF-56BA91C4-0001-67LTR5...（完整 121 字符）",
+│     "serial": 1,
+│     "max_serial": 1,
+│     "registered_at": "2026-09-28T11:17:45",
 │     "status": "active"
 │   }
 │

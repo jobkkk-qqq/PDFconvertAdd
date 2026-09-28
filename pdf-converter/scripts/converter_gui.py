@@ -9,8 +9,8 @@ import os
 import sys
 import json
 import re
+import base64
 import hashlib
-import hmac
 import subprocess
 import platform
 from datetime import datetime
@@ -157,42 +157,70 @@ def generate_machine_code():
 
 
 # ============================================================
-# 第二部分: 许可码验证逻辑（原 generate_license.py）
+# 第二部分: 许可码验证逻辑（Ed25519 非对称验签）
 # ============================================================
+#
+# 这里只内置**公钥**：它只能验签、不能造码。签名用的私钥只在开发者本机，
+# 所以即使本文件被完整公开，也无法据此生成有效许可码（旧版用对称 HMAC，
+# 密钥放在客户端里，等于把生成器交给了每个用户）。
 
-DEVELOPER_SECRET = "PDFConverter2026_SecretKey_v1.0"
+PUBLIC_KEY_HEX = "324B31ED07C4C8772BAD3D5DDAE01F907D9226921C64D928F6D298780A8804C0"
+LICENSE_PREFIX = "PDF"
+
+# 同目录自带的纯标准库 Ed25519（打包时需一并打进 scripts/）
+try:
+    from ed25519 import verify as _ed25519_verify
+except ImportError:
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from ed25519 import verify as _ed25519_verify
+    except ImportError:
+        _ed25519_verify = None
+
+
+def parse_license_code(license_code):
+    """解析许可码；格式不对返回 None"""
+    if not license_code:
+        return None
+    parts = str(license_code).strip().upper().split("-")
+    if len(parts) != 4 or parts[0] != LICENSE_PREFIX:
+        return None
+    _, mp, serial_str, sig32 = parts
+    if len(mp) != 8 or any(c not in "0123456789ABCDEF" for c in mp):
+        return None
+    if len(serial_str) != 4 or not serial_str.isdigit():
+        return None
+    return {"machine_prefix": mp, "serial": int(serial_str), "sig32": sig32}
 
 
 def verify_license_code(license_code, machine_code):
-    """验证许可码是否有效"""
-    pattern = r'^PDF-[A-F0-9]{8}-\d{4}-[A-F0-9]{8}$'
-    if not re.match(pattern, license_code.upper()):
+    """用内置公钥验签。返回 (是否有效, 说明)"""
+    if _ed25519_verify is None:
+        return False, "验签模块缺失（ed25519.py 未随程序分发）"
+    parsed = parse_license_code(license_code)
+    if not parsed:
         return False, "许可码格式无效"
-
-    machine_pattern = r'^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$'
-    if not re.match(machine_pattern, machine_code.upper()):
+    if not re.match(r'^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$',
+                    str(machine_code).strip().upper()):
         return False, "机器码格式无效"
-
-    license_code = license_code.upper()
-    machine_code = machine_code.upper()
-
-    # 提取许可码组成部分
-    m = re.match(r'^PDF-([A-F0-9]{8})-(\d{4})-([A-F0-9]{8})$', license_code)
-    machine_prefix = machine_code.replace('-', '')[:8]
-
-    if m.group(1) != machine_prefix:
+    mp = str(machine_code).strip().upper().replace('-', '')[:8]
+    if parsed["machine_prefix"] != mp:
         return False, "许可码与机器码不匹配"
-
-    # 重新计算校验位
-    message = f"PDF-{machine_prefix}-{m.group(2)}"
-    expected = hmac.new(DEVELOPER_SECRET.encode('utf-8'),
-                        message.encode('utf-8'),
-                        hashlib.sha256).hexdigest()[:8].upper()
-
-    if m.group(3) == expected:
-        return True, "许可码有效"
-    else:
-        return False, "许可码校验失败"
+    try:
+        sig32 = parsed["sig32"]
+        sig = base64.b32decode(sig32 + "=" * ((8 - len(sig32) % 8) % 8))
+    except Exception:
+        return False, "许可码格式无效"
+    if len(sig) != 64:
+        return False, "许可码格式无效"
+    # 用许可码内嵌的序列号重算被签消息，因此天然支持续期（序列号 >= 2）
+    msg = ("%s-%s-%04d" % (LICENSE_PREFIX, mp, parsed["serial"])).encode("utf-8")
+    try:
+        if _ed25519_verify(sig, msg, bytes.fromhex(PUBLIC_KEY_HEX)):
+            return True, "许可码有效"
+    except Exception:
+        pass
+    return False, "许可码校验失败（签名不对，可能伪造或输错）"
 
 
 # ============================================================
@@ -1295,35 +1323,52 @@ class PDFConverterLicense:
     def get_config(self):
         if os.path.exists(self.config_file):
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                cfg.pop("developer_key", None)  # 旧配置里残留的对称密钥字段，已废弃
+                return cfg
         return self.default_config.copy()
 
     def register(self, machine_code, license_code):
-        """注册"""
-        if not re.match(r'^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$', machine_code.upper()):
-            return False, "机器码格式无效"
-        if not re.match(r'^PDF-[A-F0-9]{8}-\d{4}-[A-F0-9]{8}$', license_code.upper()):
-            return False, "许可码格式无效"
+        """注册 / 续期。同一台机器必须用**序列号更大**的新许可码，旧码不能复用。
+        （旧版本会直接拒绝"已注册机器"，导致过期后无法续期，这里已修正。）"""
+        machine_code = str(machine_code).strip().upper()
+        license_code = str(license_code).strip().upper()
 
         is_valid, message = verify_license_code(license_code, machine_code)
         if not is_valid:
             return False, message
 
-        existing = self.get_license_info()
-        if existing:
-            if existing.get('machine_code') == machine_code:
-                return False, "此机器已注册，无需重复注册"
-            return False, "此许可码已注册到另一台机器"
+        parsed = parse_license_code(license_code)
+        serial = parsed["serial"]
 
+        existing = self.get_license_info()
+        prev_serial = 0
+        if existing:
+            if existing.get('machine_code') != machine_code:
+                return False, "此许可码已注册到另一台机器"
+            prev_serial = int(existing.get('max_serial') or 0)
+            if not prev_serial:
+                old = parse_license_code(existing.get('license_code', ''))
+                prev_serial = old["serial"] if old else 0
+            if serial <= prev_serial:
+                return False, (
+                    "这是第 %d 次授权，本机已用到第 %d 次。"
+                    "请使用序列号大于 %d 的新许可码续期" % (serial, prev_serial, prev_serial)
+                )
+
+        limit = self.get_config().get("max_files_per_license", 20)
         license_info = {
-            "machine_code": machine_code.upper(),
-            "license_code": license_code.upper(),
+            "machine_code": machine_code,
+            "license_code": license_code,
+            "serial": serial,
+            "max_serial": max(serial, prev_serial),
             "registered_at": datetime.now().isoformat(),
-            "status": "active"
+            "status": "active",
         }
         self.save_license(license_info)
         self.save_usage({"total_files": 0, "files": [], "last_reset": None})
-        return True, "注册成功！您现在可以转换20个文件。"
+        return True, "注册成功！本次授权可转换 %d 个文件（第 %d 次授权）。" % (limit, serial)
 
     def check_and_increment(self, filename):
         """检查配额并计数"""

@@ -8,76 +8,26 @@
 import os
 import sys
 import re
-import hashlib
-import hmac
 from datetime import datetime
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 
 # ============================================================
-# 许可码生成核心逻辑（与 generate_license.py 保持一致）
+# 许可码生成核心逻辑：直接复用 generate_license.py
+# ------------------------------------------------------------
+# 以前这里是一份重复实现（同样带着对称密钥），改一次要改两处、极易走偏。
+# 现在统一从 generate_license 导入；本工具是**开发者端**，签名需要私钥，
+# 私钥从仓库外读取（见 generate_license.py 的私钥查找顺序），不随仓库分发。
 # ============================================================
 
-DEVELOPER_SECRET = "PDFConverter2026_SecretKey_v1.0"
-MAX_FILE_LIMIT = 20
-
-
-def validate_machine_code(machine_code):
-    """验证机器码格式 XXXX-XXXX-XXXX-XXXX"""
-    pattern = r'^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$'
-    return re.match(pattern, machine_code.upper()) is not None
-
-
-def generate_license_code(machine_code, serial_number=1):
-    """
-    生成许可码
-    格式: PDF-{机器码前8位}-{序列号4位}-{HMAC签名8位}
-    """
-    if not validate_machine_code(machine_code):
-        raise ValueError(f"无效的机器码格式: {machine_code}")
-
-    machine_code = machine_code.upper()
-    code_hash = machine_code.replace("-", "")
-    machine_prefix = code_hash[:8]
-    serial_str = f"{serial_number:04d}"
-
-    # 计算校验位（HMAC-SHA256）
-    message = f"PDF-{machine_prefix}-{serial_str}"
-    signature = hmac.new(
-        DEVELOPER_SECRET.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()[:8].upper()
-
-    return f"PDF-{machine_prefix}-{serial_str}-{signature}"
-
-
-def verify_license_code(license_code, machine_code):
-    """验证许可码"""
-    pattern = r'^PDF-[A-F0-9]{8}-\d{4}-[A-F0-9]{8}$'
-    if not re.match(pattern, license_code.upper()):
-        return False, "许可码格式无效"
-    if not validate_machine_code(machine_code):
-        return False, "机器码格式无效"
-
-    license_code = license_code.upper()
-    machine_code = machine_code.upper()
-
-    m = re.match(r'^PDF-([A-F0-9]{8})-(\d{4})-([A-F0-9]{8})$', license_code)
-    machine_prefix = machine_code.replace('-', '')[:8]
-
-    if m.group(1) != machine_prefix:
-        return False, "许可码与机器码不匹配"
-
-    message = f"PDF-{machine_prefix}-{m.group(2)}"
-    expected = hmac.new(DEVELOPER_SECRET.encode('utf-8'),
-                        message.encode('utf-8'),
-                        hashlib.sha256).hexdigest()[:8].upper()
-
-    if m.group(3) == expected:
-        return True, "许可码有效"
-    return False, "许可码校验失败"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from generate_license import (  # noqa: E402
+    MAX_FILE_LIMIT,
+    validate_machine_code,
+    generate_license_code,
+    verify_license_code,
+)
 
 
 # ============================================================
@@ -89,7 +39,7 @@ class LicenseGeneratorGUI:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("许可码生成器 v1.0（开发者工具）")
+        self.root.title("许可码生成器 v2.0（开发者工具 / Ed25519）")
         self.root.geometry("620x520")
         self.root.resizable(False, False)
 

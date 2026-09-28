@@ -76,6 +76,7 @@ def main():
         ('pdf-converter/scripts/doc_to_pdf.py', 'doc_to_pdf.py'),
         ('pdf-converter/scripts/excel_to_pdf.py', 'excel_to_pdf.py'),
         ('pdf-converter/scripts/license_checker.py', 'license_checker.py'),
+        ('pdf-converter/scripts/ed25519.py', 'ed25519.py'),
         ('licensing/scripts/get_machine_code.py', 'get_machine_code.py'),
         ('licensing/scripts/verify_license.py', 'verify_license.py'),
         ('licensing/scripts/register.py', 'register.py'),

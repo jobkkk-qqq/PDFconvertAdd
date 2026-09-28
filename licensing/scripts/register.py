@@ -27,12 +27,11 @@ class LicenseManager:
         # 确保配置目录存在
         os.makedirs(config_dir, exist_ok=True)
 
-        # 默认配置
+        # 默认配置：改用 Ed25519 非对称验签后，客户端**不再需要任何签名密钥**
         self.default_config = {
-            "version": "1.0.0",
+            "version": "2.0.0",
             "max_files_per_license": 20,
             "license_prefix": "PDF",
-            "developer_key": "PDFConverter2026_SecretKey_v1.0"
         }
 
     def init_config(self):
@@ -44,10 +43,13 @@ class LicenseManager:
         return False
 
     def load_config(self):
-        """加载配置"""
+        """加载配置（丢弃旧文件里残留的对称密钥字段）"""
         if os.path.exists(self.config_file):
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                cfg.pop("developer_key", None)
+                return cfg
         return self.default_config.copy()
 
     def save_config(self, config):
@@ -81,7 +83,7 @@ class LicenseManager:
 
     def register(self, machine_code, license_code):
         """
-        注册新许可
+        注册 / 续期许可
 
         参数:
             machine_code: 机器码
@@ -89,44 +91,55 @@ class LicenseManager:
 
         返回:
             (成功标志, 消息)
+
+        续期规则：同一台机器必须用**序列号更大**的新许可码，旧码不能重复使用。
+        （旧版本直接拒绝"已注册机器"，导致过期后无法续期，这里已修正。）
         """
-        # 验证许可码（需要导入生成许可的逻辑）
-        from generate_license import verify_license_code
+        # 验证许可码（复用 generate_license 的验签逻辑）
+        from generate_license import verify_license_code, get_license_info
+
+        machine_code = str(machine_code).strip().upper()
+        license_code = str(license_code).strip().upper()
 
         is_valid, message = verify_license_code(license_code, machine_code)
-
         if not is_valid:
             return False, message
 
-        # 加载现有许可
+        info = get_license_info(license_code) or {}
+        serial = int(info.get("serial_number") or 0)
+
+        # 加载现有许可：同机续期要求序列号递增
         existing_license = self.load_license()
-
-        # 如果已注册，检查是否是同一台机器
+        prev_serial = 0
         if existing_license:
-            if existing_license.get('machine_code') == machine_code:
-                return False, "此机器已注册，无需重复注册"
-            else:
-                return False, f"此许可码已注册到另一台机器 (机器码: {existing_license.get('machine_code')})"
+            if existing_license.get('machine_code') != machine_code:
+                return False, "此许可码已注册到另一台机器 (机器码: %s)" % existing_license.get('machine_code')
+            prev_serial = int(existing_license.get('max_serial') or 0)
+            if not prev_serial:
+                old = get_license_info(existing_license.get('license_code', '')) or {}
+                prev_serial = int(old.get("serial_number") or 0)
+            if serial <= prev_serial:
+                return False, (
+                    "这是第 %d 次授权，本机已用到第 %d 次。"
+                    "请使用序列号大于 %d 的新许可码续期" % (serial, prev_serial, prev_serial)
+                )
 
-        # 保存许可信息
+        limit = self.load_config().get("max_files_per_license", 20)
         license_info = {
             "machine_code": machine_code,
             "license_code": license_code,
+            "serial": serial,
+            "max_serial": max(serial, prev_serial),
             "registered_at": datetime.now().isoformat(),
-            "status": "active"
+            "status": "active",
         }
 
         self.save_license(license_info)
 
-        # 初始化使用记录
-        usage = {
-            "total_files": 0,
-            "files": [],
-            "last_reset": None
-        }
-        self.save_usage(usage)
+        # 换了新授权，计数归零（新的一份名额）
+        self.save_usage({"total_files": 0, "files": [], "last_reset": None})
 
-        return True, "注册成功！您现在可以转换20个文件。"
+        return True, "注册成功！本次授权可转换 %d 个文件（第 %d 次授权）。" % (limit, serial)
 
     def check_license(self):
         """

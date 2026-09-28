@@ -23,7 +23,10 @@ def main():
         print("用法: python verify_license.py <机器码> <许可码>")
         print()
         print("示例:")
-        print("  python verify_license.py A1B2C3D4-E5F6G7H8-I9J0K1L2-M3N4O5P6 PDF-A1B2C3D4-0001-ABCDEF01")
+        print("  python verify_license.py 56BA-91C4-AD56-9ACA \\")
+        print("         PDF-56BA91C4-0001-67LTR57D6STCN4KO7236ZR6EFNDQCYRMW75LJXTBX2HVCAGBOO6CG5IWXC2GB2FD373O6QNVBZTMNIR4E6BFIUUIGFNC743HGLFYUCQ")
+        print()
+        print("（许可码较长，请完整复制粘贴）")
         sys.exit(1)
 
     machine_code = sys.argv[1].upper()

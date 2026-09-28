@@ -1,153 +1,214 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-许可码生成工具（开发者使用）
-根据机器码生成注册许可码
-许可码格式: PDF-{机器码前8位}-{序列号}-{校验位}
+许可码生成 / 验证工具（开发者使用）—— Ed25519 非对称签名版
+
+许可码格式（与 PrintShare 通用，两边可互发互认）：
+    PDF-{机器码前8位}-{序列号4位}-{签名Base32}
+例：PDF-ABCD1234-0001-<103 个字符的 Base32 签名>
+
+为什么改用非对称：原来用对称 HMAC，验签密钥必须随程序分发给用户，
+等于把"生成器"交到用户手里。现在程序里只内置**公钥**（只能验签），
+签名用的**私钥**只在开发者本机的密钥文件里，永不入库、永不进 exe。
+
+关于长度：Ed25519 签名固定 64 字节，必须完整保留才能验签（不能截断），
+Base32 编码后 103 字符，所以整串注册码约 121 字符——比原来的 8 字符长得多，
+但这是非对称签名的固有代价。用户复制粘贴即可，不需要手输。
+
+私钥查找顺序（第一个存在的即用）：
+    1. 环境变量 LICENSE_PRIVATE_KEY 指定的文件
+    2. <仓库根>/license-private-key.json
+    3. <仓库根>/../license-keys/license-private-key.json
+    4. ~/.license-keys/private-key.json
+密钥文件可以是本仓库工具生成的 JSON（含 privateSeedHex），
+也可以是一行 64 位十六进制的私钥种子。
 """
 
+import base64
+import json
+import os
 import sys
-import hashlib
-import hmac
-import re
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ed25519  # noqa: E402
 
 
-# 开发者密钥（实际项目中应安全存储）
-DEVELOPER_SECRET = "PDFConverter2026_SecretKey_v1.0"
+LICENSE_PREFIX = "PDF"
+# 公钥：公开无妨，它只能验签、不能造码。两个程序内置同一个公钥。
+PUBLIC_KEY_HEX = "324B31ED07C4C8772BAD3D5DDAE01F907D9226921C64D928F6D298780A8804C0"
+# 本产品配额：每次授权 20 份（PDFconvertAdd 的既有政策，未改动）
 MAX_FILE_LIMIT = 20
 
 
+def _public_key_bytes():
+    return bytes.fromhex(PUBLIC_KEY_HEX)
+
+
 def validate_machine_code(machine_code):
-    """验证机器码格式"""
-    # 格式: XXXX-XXXX-XXXX-XXXX (每组4个字符)
-    pattern = r'^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$'
-    return re.match(pattern, machine_code.upper()) is not None
+    """机器码格式：XXXX-XXXX-XXXX-XXXX（每段 4 位十六进制）"""
+    if not machine_code:
+        return False
+    code = str(machine_code).strip().upper()
+    if len(code) != 19:
+        return False
+    parts = code.split("-")
+    if len(parts) != 4:
+        return False
+    for p in parts:
+        if len(p) != 4 or any(c not in "0123456789ABCDEF" for c in p):
+            return False
+    return True
 
 
-def extract_machine_code_hash(machine_code):
-    """从机器码中提取原始哈希"""
-    # 移除连字符
-    clean_code = machine_code.replace("-", "")
-    return clean_code
+def _machine_prefix(machine_code):
+    return str(machine_code).strip().upper().replace("-", "")[:8]
 
 
-def generate_license_code(machine_code, serial_number=1):
-    """
-    生成许可码
+def _message(machine_prefix, serial_number):
+    return "%s-%s-%04d" % (LICENSE_PREFIX, machine_prefix, int(serial_number))
 
-    参数:
-        machine_code: 用户的机器码 (格式: XXXX-XXXX-XXXX-XXXX)
-        serial_number: 序列号，用于区分同一机器的多次授权
 
-    返回:
-        许可码字符串
-    """
+def _b32_nopad(raw):
+    return base64.b32encode(raw).decode("ascii").rstrip("=")
+
+
+def _b32_decode(s):
+    pad = (8 - len(s) % 8) % 8
+    return base64.b32decode(s + "=" * pad)
+
+
+# ---------------- 私钥（仅生成端使用） ----------------
+
+def _candidate_key_paths():
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(os.path.dirname(here))
+    cands = []
+    env = os.environ.get("LICENSE_PRIVATE_KEY")
+    if env:
+        cands.append(env)
+    cands.append(os.path.join(repo_root, "license-private-key.json"))
+    cands.append(os.path.join(os.path.dirname(repo_root), "license-keys", "license-private-key.json"))
+    cands.append(os.path.join(os.path.expanduser("~"), ".license-keys", "private-key.json"))
+    return cands
+
+
+def load_private_seed(path=None):
+    """读取 32 字节私钥种子；找不到就抛出带指引的错误。"""
+    cands = [path] if path else _candidate_key_paths()
+    for p in cands:
+        if not p or not os.path.exists(p):
+            continue
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+        except OSError:
+            continue
+        seed = None
+        if raw.startswith("{"):
+            try:
+                seed = bytes.fromhex(json.loads(raw)["privateSeedHex"].strip())
+            except Exception:
+                seed = None
+        elif len(raw) == 64:
+            try:
+                seed = bytes.fromhex(raw)
+            except ValueError:
+                seed = None
+        if seed and len(seed) == 32:
+            return seed
+    raise RuntimeError(
+        "找不到私钥。请把私钥文件放到下列任一位置，或用环境变量指定：\n"
+        "  - 环境变量 LICENSE_PRIVATE_KEY=<私钥文件路径>\n"
+        "  - <仓库根>/license-private-key.json\n"
+        "  - <仓库根>/../license-keys/license-private-key.json\n"
+        "  - ~/.license-keys/private-key.json"
+    )
+
+
+# ---------------- 生成 / 验证 ----------------
+
+def generate_license_code(machine_code, serial_number=1, private_seed=None):
+    """生成许可码。序列号用于续期：同一台机器每次续期都要用更大的序列号。"""
     if not validate_machine_code(machine_code):
-        raise ValueError(f"无效的机器码格式: {machine_code}")
-
-    machine_code = machine_code.upper()
-
-    # 提取机器码哈希
-    code_hash = extract_machine_code_hash(machine_code)
-
-    # 生成许可码主体
-    license_prefix = "PDF"
-    machine_prefix = code_hash[:8]  # 取前8位
-    serial_str = f"{serial_number:04d}"  # 4位序列号
-
-    # 计算校验位（HMAC-SHA256）
-    message = f"{license_prefix}-{machine_prefix}-{serial_str}"
-    signature = hmac.new(
-        DEVELOPER_SECRET.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()[:8].upper()
-
-    # 组装许可码
-    license_code = f"{license_prefix}-{machine_prefix}-{serial_str}-{signature}"
-
-    return license_code
+        raise ValueError("无效的机器码格式: %s" % machine_code)
+    serial_number = int(serial_number)
+    if serial_number < 1 or serial_number > 9999:
+        raise ValueError("序列号必须是 1..9999 之间的整数")
+    if private_seed is None:
+        private_seed = load_private_seed()
+    prefix = _machine_prefix(machine_code)
+    sig = ed25519.sign(_message(prefix, serial_number).encode("utf-8"), private_seed)
+    return "%s-%s-%04d-%s" % (LICENSE_PREFIX, prefix, serial_number, _b32_nopad(sig))
 
 
 def verify_license_code(license_code, machine_code):
-    """
-    验证许可码是否有效
-
-    参数:
-        license_code: 要验证的许可码
-        machine_code: 对应的机器码
-
-    返回:
-        (是否有效, 错误信息)
-    """
-    # 验证许可码格式
-    pattern = r'^PDF-[A-F0-9]{8}-\d{4}-[A-F0-9]{8}$'
-    if not re.match(pattern, license_code.upper()):
+    """验证许可码是否为本机有效码（用内置公钥验签）。返回 (是否有效, 说明)。"""
+    if not license_code or not str(license_code).strip():
+        return False, "许可码为空"
+    parts = str(license_code).strip().upper().split("-")
+    if len(parts) != 4 or parts[0] != LICENSE_PREFIX:
+        return False, "许可码格式无效"
+    _, mp, serial_str, sig32 = parts
+    if len(mp) != 8 or any(c not in "0123456789ABCDEF" for c in mp):
+        return False, "许可码格式无效"
+    if len(serial_str) != 4 or not serial_str.isdigit():
+        return False, "许可码格式无效"
+    try:
+        sig = _b32_decode(sig32)
+    except Exception:
+        return False, "许可码格式无效"
+    if len(sig) != 64:
         return False, "许可码格式无效"
 
-    license_code = license_code.upper()
-
-    # 验证机器码格式
     if not validate_machine_code(machine_code):
         return False, "机器码格式无效"
-
-    machine_code = machine_code.upper()
-
-    # 校验机器码前缀与许可码一致
-    machine_prefix = machine_code.replace("-", "")[:8]
-    if license_code[4:12] != machine_prefix:
+    if mp != _machine_prefix(machine_code):
         return False, "许可码与机器码不匹配"
 
-    # 按许可码内嵌的序列号重算校验位，以支持续期（序列号>=2）
-    serial_str = license_code[13:17]
-    message = f"PDF-{machine_prefix}-{serial_str}"
-    signature = hmac.new(
-        DEVELOPER_SECRET.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()[:8].upper()
-
-    # 比较校验位
-    if license_code[18:] == signature:
+    # 用许可码里内嵌的序列号重算被签名的消息，因此天然支持续期（序列号 >= 2）
+    msg = _message(mp, int(serial_str)).encode("utf-8")
+    if ed25519.verify(sig, msg, _public_key_bytes()):
         return True, "许可码有效"
-    else:
-        return False, "许可码与机器码不匹配"
+    return False, "许可码校验失败（签名不对，可能伪造或输错）"
 
 
 def get_license_info(license_code):
-    """从许可码中提取信息"""
-    pattern = r'^PDF-([A-F0-9]{8})-(\d{4})-([A-F0-9]{8})$'
-    match = re.match(pattern, license_code.upper())
-
-    if match:
-        return {
-            "machine_prefix": match.group(1),
-            "serial_number": int(match.group(2)),
-            "signature": match.group(3),
-            "max_files": MAX_FILE_LIMIT
-        }
-    return None
+    """从许可码中提取信息（不校验签名）"""
+    if not license_code:
+        return None
+    parts = str(license_code).strip().upper().split("-")
+    if len(parts) != 4 or parts[0] != LICENSE_PREFIX:
+        return None
+    _, mp, serial_str, sig32 = parts
+    if not serial_str.isdigit():
+        return None
+    return {
+        "machine_prefix": mp,
+        "serial_number": int(serial_str),
+        "signature": sig32,
+        "max_files": MAX_FILE_LIMIT,
+    }
 
 
 def _print_license(machine_code, serial, license_code):
     print("=" * 60)
-    print("PDF转换器 - 许可码生成工具")
+    print("PDF转换器 - 许可码生成工具（Ed25519）")
     print("=" * 60)
     print()
-    print(f"机器码:   {machine_code}")
-    print(f"序列号:   {serial}")
-    print(f"文件限制: {MAX_FILE_LIMIT} 个文件")
+    print("机器码:   %s" % machine_code)
+    print("序列号:   %s" % serial)
+    print("文件限制: %s 个文件" % MAX_FILE_LIMIT)
     print()
     print("=" * 60)
     print("许可码:")
-    print(f"  {license_code}")
+    print("  %s" % license_code)
     print("=" * 60)
     print()
-    print("请将此许可码提供给用户进行注册。")
+    print("请将此许可码完整复制给用户进行注册（复制粘贴，不要手输）。")
 
 
 def _safe_input(prompt=""):
-    """读取一行输入；stdin关闭或被中断时返回空串，避免闪退崩溃。"""
+    """读取一行输入；stdin 关闭或被中断时返回空串，避免闪退。"""
     try:
         return input(prompt)
     except (EOFError, KeyboardInterrupt):
@@ -155,14 +216,13 @@ def _safe_input(prompt=""):
 
 
 def _interactive_main():
-    """无参数时进入交互模式（双击运行时使用），结束前驻留以便查看结果。"""
+    """无参数时进入交互模式（双击运行），结束前驻留以便查看结果。"""
     print("=" * 60)
-    print("PDF转换器 - 许可码生成工具（交互模式）")
+    print("PDF转换器 - 许可码生成工具（交互模式 / Ed25519）")
     print("=" * 60)
     print()
     while True:
-        machine_code = _safe_input(
-            "请输入机器码 (格式 XXXX-XXXX-XXXX-XXXX，直接回车退出): ").strip().upper()
+        machine_code = _safe_input("请输入机器码 (格式 XXXX-XXXX-XXXX-XXXX，直接回车退出): ").strip().upper()
         if not machine_code:
             print("已退出。")
             break
@@ -170,13 +230,18 @@ def _interactive_main():
             print("  机器码格式无效，请重新输入。")
             print()
             continue
-        serial_str = _safe_input("请输入序列号 (默认1): ").strip() or "1"
+        serial_str = _safe_input("请输入序列号 (默认1，续期请填比上次更大的数字): ").strip() or "1"
         try:
             serial = int(serial_str)
         except ValueError:
             print("  序列号无效，已使用默认值1。")
             serial = 1
-        license_code = generate_license_code(machine_code, serial)
+        try:
+            license_code = generate_license_code(machine_code, serial)
+        except Exception as e:
+            print("  生成失败：%s" % e)
+            print()
+            continue
         print()
         _print_license(machine_code, serial, license_code)
         print()
@@ -184,7 +249,7 @@ def _interactive_main():
 
 
 def main():
-    # 控制台输出统一使用UTF-8，避免中文乱码
+    # 控制台输出统一 UTF-8，避免中文乱码
     for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8")
@@ -201,11 +266,13 @@ def main():
     try:
         license_code = generate_license_code(machine_code, serial)
         _print_license(machine_code, serial, license_code)
-
     except ValueError as e:
-        print(f"错误: {e}", file=sys.stderr)
+        print("错误: %s" % e, file=sys.stderr)
+        sys.exit(1)
+    except RuntimeError as e:
+        print("错误: %s" % e, file=sys.stderr)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -203,7 +203,10 @@ PDF转换器 - 注册状态
 
 修改 `licensing/scripts/generate_license.py` 中的常量：
 - `MAX_FILE_LIMIT` - 文件限制
-- `DEVELOPER_SECRET` - 开发者密钥
+- `PUBLIC_KEY_HEX` - 验签公钥（**可以公开**；签名私钥不在仓库里，只留在开发者本机）
+
+> 许可码用 Ed25519 非对称签名。程序内只放公钥，因此改程序也造不出有效许可码；
+> 私钥的存放位置见 `licensing/README.md`。
 
 ## 许可证
 
@@ -213,4 +216,4 @@ MIT License
 
 **开发者**: ZCode Agent (Agnes)
 **创建日期**: 2026-08-18
-**版本**: 1.0.0
+**版本**: 2.0.0（许可码改用 Ed25519 非对称签名）
