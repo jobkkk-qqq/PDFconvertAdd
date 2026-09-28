@@ -6,8 +6,8 @@
 
 许可码使用 **Ed25519 非对称签名**（RFC 8032）：
 
-- 程序里只内置**公钥** —— 它只能验签，**不能生成**许可码；
-- 签名用的**私钥**只留在开发者本机，**不进仓库、不进 exe**。
+- 本仓库（含打包出的程序）里只有**公钥** —— 它只能验签，**不能生成**许可码；
+- 签名用的**私钥**、以及**发码工具**都放在**本仓库之外**（见下节），不进仓库、不进 exe。
 
 （旧版用对称 HMAC，验签密钥必须随程序分发，等于把发码器交给每个用户；现已弃用，旧格式许可码全部失效。）
 
@@ -17,49 +17,36 @@
 licensing/
 ├── scripts/
 │   ├── get_machine_code.py      # 机器码提取工具（用户端）
-│   ├── generate_license.py      # 许可码生成 / 验证（开发者端，需要私钥）
-│   ├── license_generator_gui.py # 许可码生成器 GUI（开发者端，复用上面的逻辑）
-│   ├── verify_license.py        # 许可码验证工具
+│   ├── license_verify.py        # 许可码**验签**（只读，只有公钥，不能发码）
+│   ├── verify_license.py        # 许可码验证工具（命令行）
 │   ├── register.py              # 注册管理工具
 │   └── ed25519.py               # 纯标准库 Ed25519 实现（验签用，无第三方依赖）
-└── references/                  # 参考资料目录
+└── README.md
 ```
 
-## 私钥放哪（开发者必读）
+> 发码（签名）程序**不在本仓库**：它需要私钥，与私钥一起放在仓库外，例如
+> `<仓库根>/../license-keys/`（本机约定位置）。那边通常有 `make-license.bat` 与打包好的
+> `LicenseGenerator.exe` / `LicenseGenerator-cli.exe`，用法：输入机器码 → 得到许可码。
+> 本仓库不再包含任何生成注册码的代码或打包配置。
 
-`generate_license.py` 按以下顺序查找私钥，第一个存在的即用：
+## 私钥与发码工具放哪（开发者必读）
 
-1. 环境变量 `LICENSE_PRIVATE_KEY` 指定的文件
-2. **锚点目录**及其上级两级目录下的 `license-private-key.json`，或这些目录下 `license-keys/license-private-key.json`
-   - 锚点目录：源码运行时 = 仓库根；打包成 exe 后 = **exe 所在目录**
-3. `~/.license-keys/private-key.json`
+发码端与私钥都在仓库外，默认约定：
 
-约定把私钥放在**仓库的上一级**目录里，即 `<仓库根>/../license-keys/license-private-key.json`，
-这样源码运行和 `dist/` 下的发码 exe 都能自动找到它。若把 exe 挪到别处，请带上私钥或用环境变量指定。
+```
+<仓库根>/../license-keys/
+├── license-private-key.json        # 私钥（32 字节 seed，或含 privateSeedHex 的 JSON）
+├── license-public-key.json
+├── make-license.bat                # 一键发码
+├── LicenseGenerator.exe            # 图形界面发码
+├── LicenseGenerator-cli.exe        # 命令行发码
+└── generators/                     # 发码工具源码（按产品分目录）
+```
 
-密钥文件可以是本仓库工具生成的 JSON（含 `privateSeedHex`），也可以是一行 64 位十六进制的私钥种子。
+私钥文件可以是 JSON（含 `privateSeedHex`），也可以是一行 64 位十六进制的私钥种子。
 
 > ⚠️ 私钥**一旦丢失**，就无法再给老用户发新码（只能换密钥对并让所有用户重新注册）。请务必备份。
-> 仓库的 `.gitignore` 已排除私钥相关文件。
-
-## 打包发码工具（exe）
-
-```bash
-python build_gui.py     # 客户程序 + 发码工具一起打包
-# 或者只打开发码工具：
-pyinstaller --noconfirm LicenseGenerator.spec                 # GUI 版
-pyinstaller --noconfirm --onefile --console --name LicenseGenerator-cli licensing/scripts/generate_license.py
-```
-
-产物（都在 `dist/`，**不要发给客户**）：
-
-| 产物 | 用法 |
-|------|------|
-| `LicenseGenerator.exe` | 双击开界面：粘贴机器码 → 点"生成许可码"（自动复制到剪贴板，历史记入 `license_generator.log`） |
-| `LicenseGenerator-cli.exe` | `LicenseGenerator-cli.exe <机器码> [序列号]`；无参数时进入交互模式 |
-
-> exe **不含私钥**：发码时若提示"找不到私钥"，按上面第 2 条把私钥放到 exe 同级（或上级）目录即可。
-> GUI 版启动时会把实际加载的私钥路径写进 `license_generator.log`，便于排查。
+> 本仓库的 `.gitignore` 已排除 `license-keys/`、`*private-key*.json` 等私钥相关文件。
 
 ## 快速开始
 
@@ -81,12 +68,7 @@ python get_machine_code.py
 
 ### 2. 联系开发者获取许可码
 
-把机器码发给开发者，开发者用 `generate_license.py` 生成许可码：
-
-```bash
-python generate_license.py 56BA-91C4-AD56-9ACA        # 序列号 1（首次注册）
-python generate_license.py 56BA-91C4-AD56-9ACA 2      # 序列号 2（续期）
-```
+把机器码发给开发者，开发者在**仓库外的发码工具**里生成许可码（首次注册用序列号 1，续期用更大的序列号）。
 
 许可码形如（**很长，请完整复制粘贴，不要手输**）：
 
@@ -100,7 +82,15 @@ PDF-56BA91C4-0001-67LTR57D6STCN4KO7236ZR6EFNDQCYRMW75LJXTBX2HVCAGBOO6CG5IWXC2GB2
 python register.py --register <机器码> <许可码>
 ```
 
-### 4. 查看注册状态
+GUI 版客户端可直接点"注册"按钮：机器码已自动填好，粘贴许可码即可。
+
+### 4. 验证许可码（可选）
+
+```bash
+python verify_license.py <机器码> <许可码>
+```
+
+### 5. 查看注册状态
 
 ```bash
 python register.py --status
@@ -127,7 +117,7 @@ python register.py --usage
 > MAC 取自 `uuid.getnode()`（Windows 上即 `UuidCreateSequential`，主网卡地址）。
 > 换主板或换网卡会导致机器码变化，需要重新发码。
 
-### 许可码生成
+### 许可码构成
 
 | 段 | 说明 |
 |----|------|
@@ -138,7 +128,7 @@ python register.py --usage
 
 - 被签名内容：UTF-8 字符串 `PDF-{机器码前8位}-{序列号4位}`
 - 签名必须完整保留（**不能截断**），这是整串码长达 121 字符的原因
-- 验签端用内置公钥 + 许可码内嵌的序列号重算消息，因此天然支持续期
+- 验签端（`license_verify.py` / 客户端）用内置公钥 + 许可码内嵌的序列号重算消息，因此天然支持续期
 
 ### 数据存储
 
@@ -155,16 +145,18 @@ python register.py --usage
 
 ## 安全注意事项
 
-1. **公钥**可以公开（它就写在程序里），**私钥**必须留在开发者本机并做好备份
+1. **公钥**可以公开（它就写在程序里），**私钥**必须留在开发者本机并做好备份，且不要放进本仓库
 2. **机器码**基于硬件信息，换硬件会变
 3. 许可码无法伪造，但客户端仍可被逆向后打补丁绕过——本机制防的是"自己造码"，不是防破解
 4. 旧版 HMAC 密钥 `PDFConverter2026_SecretKey_v1.0` 已公开，**视为已泄露、已废弃**
 
 ## 扩展开发
 
-- 调整文件限制：改 `generate_license.py` 的 `MAX_FILE_LIMIT` 或配置里的 `max_files_per_license`
-- 换密钥对：重新生成 Ed25519 密钥对，把新公钥写进 `generate_license.py` 与
-  `pdf-converter/scripts/license_checker.py`、`pdf-converter/scripts/converter_gui.py`
+- 调整文件限制：改 `licensing/scripts/license_verify.py` 的 `MAX_FILE_LIMIT`，以及客户端
+  `pdf-converter/scripts/license_checker.py`、`converter_gui.py` 里的配额默认值（配置项 `max_files_per_license`）
+- 换密钥对：重新生成 Ed25519 密钥对后，把新**公钥**同步到 `licensing/scripts/license_verify.py`、
+  `pdf-converter/scripts/license_checker.py`、`pdf-converter/scripts/converter_gui.py`，
+  并把新私钥放到仓库外的发码端
 - 添加过期时间：可在被签名消息里加入到期日期，由验签端解析
 
 ## 许可证

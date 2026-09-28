@@ -8,10 +8,10 @@
 import sys
 import os
 
-# 添加licensing脚本路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# 与 license_verify.py 同目录
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from generate_license import (
+from license_verify import (
     validate_machine_code,
     verify_license_code,
     get_license_info

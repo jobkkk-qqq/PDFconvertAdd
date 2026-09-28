@@ -95,8 +95,8 @@ class LicenseManager:
         续期规则：同一台机器必须用**序列号更大**的新许可码，旧码不能重复使用。
         （旧版本直接拒绝"已注册机器"，导致过期后无法续期，这里已修正。）
         """
-        # 验证许可码（复用 generate_license 的验签逻辑）
-        from generate_license import verify_license_code, get_license_info
+        # 验证许可码（复用只读验签模块，本仓库不含发码能力）
+        from license_verify import verify_license_code, get_license_info
 
         machine_code = str(machine_code).strip().upper()
         license_code = str(license_code).strip().upper()
