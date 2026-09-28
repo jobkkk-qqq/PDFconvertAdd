@@ -30,14 +30,36 @@ licensing/
 `generate_license.py` 按以下顺序查找私钥，第一个存在的即用：
 
 1. 环境变量 `LICENSE_PRIVATE_KEY` 指定的文件
-2. `<仓库根>/license-private-key.json`
-3. `<仓库根>/../license-keys/license-private-key.json`
-4. `~/.license-keys/private-key.json`
+2. **锚点目录**及其上级两级目录下的 `license-private-key.json`，或这些目录下 `license-keys/license-private-key.json`
+   - 锚点目录：源码运行时 = 仓库根；打包成 exe 后 = **exe 所在目录**
+3. `~/.license-keys/private-key.json`
+
+约定把私钥放在**仓库的上一级**目录里，即 `<仓库根>/../license-keys/license-private-key.json`，
+这样源码运行和 `dist/` 下的发码 exe 都能自动找到它。若把 exe 挪到别处，请带上私钥或用环境变量指定。
 
 密钥文件可以是本仓库工具生成的 JSON（含 `privateSeedHex`），也可以是一行 64 位十六进制的私钥种子。
 
 > ⚠️ 私钥**一旦丢失**，就无法再给老用户发新码（只能换密钥对并让所有用户重新注册）。请务必备份。
 > 仓库的 `.gitignore` 已排除私钥相关文件。
+
+## 打包发码工具（exe）
+
+```bash
+python build_gui.py     # 客户程序 + 发码工具一起打包
+# 或者只打开发码工具：
+pyinstaller --noconfirm LicenseGenerator.spec                 # GUI 版
+pyinstaller --noconfirm --onefile --console --name LicenseGenerator-cli licensing/scripts/generate_license.py
+```
+
+产物（都在 `dist/`，**不要发给客户**）：
+
+| 产物 | 用法 |
+|------|------|
+| `LicenseGenerator.exe` | 双击开界面：粘贴机器码 → 点"生成许可码"（自动复制到剪贴板，历史记入 `license_generator.log`） |
+| `LicenseGenerator-cli.exe` | `LicenseGenerator-cli.exe <机器码> [序列号]`；无参数时进入交互模式 |
+
+> exe **不含私钥**：发码时若提示"找不到私钥"，按上面第 2 条把私钥放到 exe 同级（或上级）目录即可。
+> GUI 版启动时会把实际加载的私钥路径写进 `license_generator.log`，便于排查。
 
 ## 快速开始
 

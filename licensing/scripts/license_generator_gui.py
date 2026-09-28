@@ -27,6 +27,7 @@ from generate_license import (  # noqa: E402
     validate_machine_code,
     generate_license_code,
     verify_license_code,
+    find_private_key_path,
 )
 
 
@@ -43,15 +44,62 @@ class LicenseGeneratorGUI:
         self.root.geometry("620x520")
         self.root.resizable(False, False)
 
-        # 日志文件路径
-        try:
-            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        except Exception:
-            exe_dir = os.path.dirname(os.path.abspath(__file__))
-        self.log_file = os.path.join(exe_dir, 'license_generator.log')
+        # 日志文件路径：打包后写在 exe 同级目录；源码运行时写在本脚本目录
+        # （不要用 sys.executable，否则源码运行会把日志丢进 Python 安装目录）
+        if getattr(sys, 'frozen', False):
+            self.app_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            self.app_dir = os.path.dirname(os.path.abspath(__file__))
+        self.log_file = os.path.join(self.app_dir, 'license_generator.log')
+
+        # 支持命令行直接发码（GUI 版 exe 也能当脚本用，便于批量/测试）：
+        #   LicenseGenerator.exe <机器码> [序列号]
+        # 控制台不可见时把结果写到 license_code.txt，双击运行则照常开界面。
+        cli_args = [a for a in sys.argv[1:] if not a.startswith('-')]
+        if cli_args:
+            sys.exit(self._cli_generate(cli_args))
 
         self.create_widgets()
         self.log("许可码生成器已启动")
+        key_path = find_private_key_path()
+        if key_path:
+            self.log(f"私钥已加载: {key_path}")
+        else:
+            self.log("警告: 未找到私钥文件，无法生成许可码（放置位置见 licensing/README.md）")
+
+    def _cli_generate(self, args):
+        """命令行模式：<机器码> [序列号] → 结果写 license_code.txt 并打印。
+
+        给 GUI 版 exe 留的批处理/自检入口；没有参数时仍是正常的图形界面。
+        """
+        machine_code = str(args[0]).strip().upper()
+        try:
+            serial = int(args[1]) if len(args) > 1 else 1
+        except ValueError:
+            serial = 1
+        lines = ["机器码: %s" % machine_code, "序列号: %d" % serial]
+        ok = True
+        try:
+            license_code = generate_license_code(machine_code, serial)
+            is_valid, message = verify_license_code(license_code, machine_code)
+            lines.append("文件限额: %d" % MAX_FILE_LIMIT)
+            lines.append("许可码: %s" % license_code)
+            lines.append("自检: %s" % message)
+            ok = is_valid
+        except Exception as e:
+            lines.append("生成失败: %s" % e)
+            ok = False
+        text = "\n".join(lines)
+        try:
+            with open(os.path.join(self.app_dir, 'license_code.txt'), 'w', encoding='utf-8') as f:
+                f.write(text + "\n")
+        except Exception:
+            pass
+        try:
+            print(text)
+        except Exception:
+            pass
+        return 0 if ok else 1
 
     def create_widgets(self):
         """创建界面"""

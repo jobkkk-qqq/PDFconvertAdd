@@ -17,9 +17,9 @@ Base32 编码后 103 字符，所以整串注册码约 121 字符——比原来
 
 私钥查找顺序（第一个存在的即用）：
     1. 环境变量 LICENSE_PRIVATE_KEY 指定的文件
-    2. <仓库根>/license-private-key.json
-    3. <仓库根>/../license-keys/license-private-key.json
-    4. ~/.license-keys/private-key.json
+    2. 锚点目录（源码运行=仓库根；打包后=exe 所在目录）及其所有上级目录下的
+       `license-private-key.json`，或这些目录下 `license-keys/license-private-key.json`
+    3. ~/.license-keys/private-key.json
 密钥文件可以是本仓库工具生成的 JSON（含 privateSeedHex），
 也可以是一行 64 位十六进制的私钥种子。
 """
@@ -79,46 +79,103 @@ def _b32_decode(s):
 
 # ---------------- 私钥（仅生成端使用） ----------------
 
+def _search_roots():
+    """私钥搜索的锚点目录。
+
+    源码运行时锚点是仓库根；**打包成 exe 后** `__file__` 指向 PyInstaller
+    的临时解包目录（_MEIxxxx），一切相对路径都会失效，必须改用 exe 自身
+    所在目录，才能找到 exe 旁边的私钥，或上层目录里的 license-keys。
+    """
+    roots = []
+    if getattr(sys, "frozen", False):
+        try:
+            roots.append(os.path.dirname(os.path.abspath(sys.executable)))
+        except Exception:
+            pass
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        roots.append(os.path.dirname(os.path.dirname(here)))
+
+    out = []
+    for r in roots:
+        cur = os.path.abspath(r)
+        for _ in range(16):  # 锚点自身 + 一路向上直到盘符根目录
+            if cur and cur not in out:
+                out.append(cur)
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    return out
+
+
 def _candidate_key_paths():
-    here = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(os.path.dirname(here))
     cands = []
     env = os.environ.get("LICENSE_PRIVATE_KEY")
     if env:
         cands.append(env)
-    cands.append(os.path.join(repo_root, "license-private-key.json"))
-    cands.append(os.path.join(os.path.dirname(repo_root), "license-keys", "license-private-key.json"))
+    for root in _search_roots():
+        # 私钥直接放在该目录下，或放在该目录的 license-keys/ 子目录里
+        cands.append(os.path.join(root, "license-private-key.json"))
+        cands.append(os.path.join(root, "license-keys", "license-private-key.json"))
     cands.append(os.path.join(os.path.expanduser("~"), ".license-keys", "private-key.json"))
-    return cands
+    # 去重且保序
+    seen = set()
+    uniq = []
+    for c in cands:
+        if c and c not in seen:
+            seen.add(c)
+            uniq.append(c)
+    return uniq
+
+
+def _read_seed_file(path):
+    """从单个文件里解析出 32 字节私钥种子；解析不了就返回 None。"""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+    except OSError:
+        return None
+    seed = None
+    if raw.startswith("{"):
+        try:
+            seed = bytes.fromhex(json.loads(raw)["privateSeedHex"].strip())
+        except Exception:
+            seed = None
+    elif len(raw) == 64:
+        try:
+            seed = bytes.fromhex(raw)
+        except ValueError:
+            seed = None
+    return seed if seed and len(seed) == 32 else None
+
+
+def find_private_key_path():
+    """返回第一个可用的私钥文件路径；找不到返回 None（用于日志/排查）。"""
+    for p in _candidate_key_paths():
+        if _read_seed_file(p):
+            return p
+    return None
 
 
 def load_private_seed(path=None):
     """读取 32 字节私钥种子；找不到就抛出带指引的错误。"""
-    cands = [path] if path else _candidate_key_paths()
-    for p in cands:
-        if not p or not os.path.exists(p):
-            continue
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                raw = f.read().strip()
-        except OSError:
-            continue
-        seed = None
-        if raw.startswith("{"):
-            try:
-                seed = bytes.fromhex(json.loads(raw)["privateSeedHex"].strip())
-            except Exception:
-                seed = None
-        elif len(raw) == 64:
-            try:
-                seed = bytes.fromhex(raw)
-            except ValueError:
-                seed = None
-        if seed and len(seed) == 32:
+    if path:
+        seed = _read_seed_file(path)
+        if seed:
             return seed
+    else:
+        for p in _candidate_key_paths():
+            seed = _read_seed_file(p)
+            if seed:
+                return seed
     raise RuntimeError(
         "找不到私钥。请把私钥文件放到下列任一位置，或用环境变量指定：\n"
         "  - 环境变量 LICENSE_PRIVATE_KEY=<私钥文件路径>\n"
+        "  - 发码工具 exe 同级目录 / 其上级目录下的 license-private-key.json\n"
+        "  - 发码工具 exe 同级目录 / 其上级目录下的 license-keys/license-private-key.json\n"
         "  - <仓库根>/license-private-key.json\n"
         "  - <仓库根>/../license-keys/license-private-key.json\n"
         "  - ~/.license-keys/private-key.json"
