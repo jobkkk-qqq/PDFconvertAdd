@@ -8,7 +8,7 @@
 ## 项目结构
 
 ```
-D:\python\pdf2pdf\
+PDFConverterAdd\               # 仓库根目录
 ├── pdf-converter\          # PDF转换工具（用户端）
 │   ├── scripts\
 │   │   ├── converter.py        # 统一入口（集成注册验证）
@@ -81,6 +81,9 @@ D:\python\pdf2pdf\
 │  输出:                                                          │
 │  正在注册...                                                    │
 │  注册成功！您现在可以转换20个文件。                              │
+│                                                                 │
+│  GUI 版: 点"注册"按钮 → 机器码栏**已自动填好本机机器码**，      │
+│          只需粘贴开发者给的许可码即可（粘贴会自动去掉空格换行） │
 └─────────────────────────────────────────────────────────────────┘
                           ↓
 第5步：查看注册状态
@@ -293,6 +296,13 @@ python register.py --register <机器码> <许可码>
 python register.py --status
 python register.py --usage
 python register.py --reset
+```
+
+打包后的发码工具（在 `dist/`，开发者自用，私钥按约定放在仓库上一级的 `license-keys/`）：
+
+```bash
+LicenseGenerator.exe                              # 双击开界面，粘贴机器码即可发码
+LicenseGenerator-cli.exe <机器码> [序列号]         # 命令行发码
 ```
 
 ## 安全特性

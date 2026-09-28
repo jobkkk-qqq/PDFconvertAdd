@@ -1564,16 +1564,20 @@ class PDFConverterGUI:
         self.root.geometry("720x540")
         self.root.resizable(True, True)
 
-        # 日志文件路径（exe所在目录）
-        try:
+        # 日志文件路径：打包后写在 exe 同级目录；源码运行时写在本脚本目录
+        # （不要用 sys.executable，否则源码运行会把日志丢进 Python 安装目录）
+        if getattr(sys, 'frozen', False):
             exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        except Exception:
+        else:
             exe_dir = os.path.dirname(os.path.abspath(__file__))
         self.log_file = os.path.join(exe_dir, 'pdf_converter.log')
 
         # 初始化许可管理器
         self.checker = PDFConverterLicense()
         self.checker.init()
+
+        # 本机机器码缓存（获取一次后复用，避免注册/续期时反复读硬件）
+        self._local_machine_code = ""
 
         # 创建界面
         self.create_widgets()
@@ -1831,11 +1835,17 @@ class PDFConverterGUI:
             messagebox.showwarning("提示", "请先完成注册")
 
     def parse_serial_from_license(self, license_code):
-        """从许可码解析序列号: PDF-XXXXXXXX-NNNN-XXXXXXXX"""
-        m = re.match(r'^PDF-[A-F0-9]{8}-(\d{4})-[A-F0-9]{8}$', license_code.strip().upper())
-        if m:
-            return int(m.group(1))
-        return None
+        """从许可码解析序列号。
+
+        当前格式：PDF-XXXXXXXX-NNNN-<103 位 Base32 签名>；
+        旧格式（已废弃）：PDF-XXXXXXXX-NNNN-<16 位十六进制>。
+        两种都要能认出，否则注册成功后提示里会丢掉"下次该用哪个序列号"。
+        """
+        parsed = parse_license_code(license_code)
+        if parsed:
+            return parsed["serial"]
+        m = re.match(r'^PDF-[A-F0-9]{8}-(\d{4})-', license_code.strip().upper())
+        return int(m.group(1)) if m else None
 
     def copy_selection(self):
         """复制日志中选中的内容"""
@@ -1872,11 +1882,27 @@ class PDFConverterGUI:
         finally:
             self.log_menu.grab_release()
 
+    def get_local_machine_code(self, force=False):
+        """本机**真实**机器码（带缓存）。
+
+        注意不能用界面/许可文件里记录的机器码，那是注册时填进去的值；
+        这里始终现算本机硬件，注册界面要填的正是它。
+        """
+        if self._local_machine_code and not force:
+            return self._local_machine_code
+        try:
+            code, _ = generate_machine_code()
+            self._local_machine_code = code
+        except Exception as e:
+            self.log(f"获取本机机器码失败: {str(e)}")
+        return self._local_machine_code
+
     def get_machine_code(self):
         """获取机器码（直接计算，不调用外部脚本）"""
         try:
             self.log("正在获取本机硬件信息...")
             machine_code, components = generate_machine_code()
+            self._local_machine_code = machine_code
 
             for comp in components:
                 self.log(f"  硬件: {comp}")
@@ -1903,31 +1929,66 @@ class PDFConverterGUI:
             messagebox.showerror("错误", f"获取机器码失败:\n{str(e)}")
 
     def show_register_dialog(self):
-        """注册对话框"""
+        """注册对话框（机器码自动填入本机机器码，用户只需粘贴许可码）"""
         dialog = tk.Toplevel(self.root)
         dialog.title("注册")
-        dialog.geometry("420x220")
+        dialog.geometry("560x250")
         dialog.transient(self.root)
         dialog.grab_set()
 
         ttk.Label(dialog, text="机器码:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
-        machine_entry = ttk.Entry(dialog, width=40)
+        machine_entry = ttk.Entry(dialog, width=44, font=('Consolas', 10))
         machine_entry.grid(row=0, column=1, padx=10, pady=10)
 
+        # 自动填入本机机器码：省去"先点获取机器码→再去日志里翻"的步骤
+        local_code = self.get_local_machine_code()
+        if local_code:
+            machine_entry.insert(0, local_code)
+            machine_entry.selection_range(0, tk.END)
+            self.log(f"注册界面已自动填入本机机器码: {local_code}")
+
         ttk.Label(dialog, text="许可码:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
-        license_entry = ttk.Entry(dialog, width=40)
+        license_entry = ttk.Entry(dialog, width=44, font=('Consolas', 10))
         license_entry.grid(row=1, column=1, padx=10, pady=5)
 
-        # 提示：可以从日志获取机器码
-        ttk.Label(dialog, text="提示: 机器码可在日志文件中查看", foreground='gray')\
+        # 粘贴许可码后自动去掉换行/空格，长码不易被发现
+        def on_paste_license(event=None):
+            try:
+                text = self.root.clipboard_get()
+            except Exception:
+                return
+            cleaned = "".join(text.split())
+            if cleaned.upper().startswith("PDF-"):
+                license_entry.delete(0, tk.END)
+                license_entry.insert(0, cleaned.upper())
+                return "break"
+        license_entry.bind("<Control-v>", on_paste_license)
+        license_entry.bind("<Shift-Insert>", on_paste_license)
+
+        hint = ("已自动填入本机机器码（如为别的机器发码，可手动改成那台机器的机器码）\n"
+                "请粘贴开发者提供的完整许可码（约 121 个字符，务必复制粘贴，不要手输）")
+        ttk.Label(dialog, text=hint if local_code else "未能自动读取本机机器码，请点击主界面'获取机器码'后填入",
+                  foreground='gray', justify=tk.LEFT)\
             .grid(row=2, column=0, columnspan=2, pady=5)
 
         def do_register():
-            machine_code = machine_entry.get().strip()
-            license_code = license_entry.get().strip()
+            machine_code = machine_entry.get().strip().upper()
+            license_code = license_entry.get().strip().upper()
             if not machine_code or not license_code:
                 messagebox.showwarning("警告", "请填写机器码和许可码")
                 return
+            # 机器码与本机不符时确认一次，避免粘错别家机器的码
+            current_local = self.get_local_machine_code()
+            if current_local and machine_code != current_local:
+                if not messagebox.askyesno(
+                        "机器码不一致",
+                        f"填写的机器码与本机识别的不一致：\n\n"
+                        f"本机: {current_local}\n"
+                        f"填写: {machine_code}\n\n"
+                        f"若这是别的机器的机器码，注册信息会绑定到那台机器。\n"
+                        f"仍按填写的机器码注册吗？",
+                        default=messagebox.NO):
+                    return
             self.log(f"正在注册: 机器码={machine_code}")
             success, message = self.checker.register(machine_code, license_code)
             self.log(message)
