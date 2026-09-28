@@ -6,14 +6,25 @@ PyInstaller 配置文件 - GUI版本
 
 import os
 
+from PyInstaller.utils.hooks import collect_all
+
 # 项目根目录（PyInstaller 在项目根目录执行，cwd 即项目根）
 _base_dir = os.getcwd()
+
+# RapidOCR（发票识别用 OCR 引擎）：源码里是**函数内懒加载**
+# （converter_gui.get_ocr_engine 里的 `from rapidocr_onnxruntime import RapidOCR`），
+# PyInstaller 静态分析抓不到；而且它自带 onnx 模型属于包数据文件。
+# 不显式收集的话，打包出来的 exe 一出 OCR 路径就会报 ModuleNotFound/找不到模型。
+try:
+    _rapid_datas, _rapid_binaries, _rapid_hiddenimports = collect_all('rapidocr_onnxruntime')
+except Exception:
+    _rapid_datas, _rapid_binaries, _rapid_hiddenimports = [], [], []
 
 # GUI版本（onedir）
 a_gui = Analysis(
     [os.path.join(_base_dir, 'pdf-converter', 'scripts', 'converter_gui.py')],
     pathex=[_base_dir],
-    binaries=[],
+    binaries=_rapid_binaries,
     datas=[
         ('pdf-converter/scripts/pdf_to_word.py', 'scripts'),
         ('pdf-converter/scripts/pdf_to_excel.py', 'scripts'),
@@ -30,7 +41,7 @@ a_gui = Analysis(
         ('licensing/scripts/generate_license.py', 'scripts'),
         ('licensing/scripts/verify_license.py', 'scripts'),
         ('licensing/scripts/register.py', 'scripts'),
-    ],
+    ] + _rapid_datas,
     hiddenimports=[
         'fitz',
         'pymupdf',
@@ -74,7 +85,7 @@ a_gui = Analysis(
         'invoice_recognizer',
         'pdf_page_editor',
         'image_to_pdf',
-    ],
+    ] + _rapid_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

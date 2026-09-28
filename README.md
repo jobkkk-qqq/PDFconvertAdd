@@ -158,6 +158,7 @@ PDF - XXXXXXXX - NNNN - <Base32 签名>
 ```bash
 pip install pyinstaller
 pyinstaller --noconfirm PDFConverter_gui.spec      # GUI 版 → dist/PDFConverter_gui/
+python build_gui.py                                # 一条命令出客户程序 + 发码工具
 ```
 
 各 spec 用途：
@@ -166,7 +167,19 @@ pyinstaller --noconfirm PDFConverter_gui.spec      # GUI 版 → dist/PDFConvert
 |------|------|
 | `PDFConverter_gui.spec` | GUI 版（推荐分发） |
 | `PDFConverter.spec` | 命令行版 |
-| `LicenseGenerator.spec` | 许可码生成工具（开发者自用） |
+| `LicenseGenerator.spec` | 发码工具 GUI 版 → `dist/LicenseGenerator.exe`（开发者自用） |
+
+发码工具（开发者自用，**不要发给客户**）：
+
+| 产物 | 说明 |
+|------|------|
+| `dist/LicenseGenerator.exe` | 图形界面发码：粘贴机器码 → 生成并自动复制许可码 |
+| `dist/LicenseGenerator-cli.exe` | 命令行发码：`LicenseGenerator-cli.exe <机器码> [序列号]` |
+
+> exe 里**不含私钥**，签发时按顺序查找：`LICENSE_PRIVATE_KEY` 环境变量 →
+> exe 同级目录及其上级目录下的 `license-private-key.json` 或 `license-keys/license-private-key.json`
+> → `~/.license-keys/private-key.json`。私钥按约定放在仓库上一级的 `license-keys/` 目录，
+> exe 放在 `dist/` 时能自动找到；若把 exe 挪到别处，请一并带上私钥或用环境变量指定。
 
 ## 文档
 
