@@ -251,7 +251,7 @@ def main():
 
         # 调用机器码获取脚本 - 计算正确路径
         converter_dir = os.path.dirname(os.path.abspath(__file__))
-        # converter/scripts -> pdf-converter -> pdf2pdf -> licensing/scripts
+        # scripts -> pdf-converter -> 仓库根 -> licensing/scripts
         licensing_dir = os.path.join(converter_dir, '..', '..', 'licensing', 'scripts')
         licensing_dir = os.path.abspath(licensing_dir)
         get_code_script = os.path.join(licensing_dir, 'get_machine_code.py')

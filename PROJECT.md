@@ -7,7 +7,7 @@
 ## 项目结构
 
 ```
-pdf2pdf/
+PDFConverterAdd/           # 仓库根目录
 ├── pdf-converter/           # PDF转换工具
 │   ├── scripts/
 │   │   ├── converter.py     # 统一转换入口

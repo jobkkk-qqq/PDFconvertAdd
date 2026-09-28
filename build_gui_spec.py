@@ -1,15 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 配置文件 - GUI版本
+PyInstaller 配置文件 - GUI版本（旧版，保留作参考）
 用于打包PDF转换器图形界面
+
+注意：日常打包请用仓库根目录下维护中的 spec：build_gui_spec.spec
+本文件里的 excludes 含 numpy 与 tkinter.ttk，且未收集 RapidOCR/onnxruntime，
+直接使用会导致界面/OCR 相关功能不可用。
 """
+
+import os
 
 block_cipher = None
 
+# 文件所在目录（即仓库根）；不再依赖任何本机绝对路径
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+
 # GUI版本
 a_gui = Analysis(
-    ['pdf-converter/scripts/converter_gui.py'],
-    pathex=['D:\\python\\pdf2pdf'],
+    [os.path.join(_base_dir, 'pdf-converter', 'scripts', 'converter_gui.py')],
+    pathex=[_base_dir],
     binaries=[],
     datas=[
         ('pdf-converter/scripts/pdf_to_word.py', 'scripts'),
@@ -82,8 +91,8 @@ exe_gui = EXE(
 
 # 许可码生成工具（保持命令行版本）
 a_license = Analysis(
-    ['licensing/scripts/generate_license.py'],
-    pathex=['D:\\python\\pdf2pdf'],
+    [os.path.join(_base_dir, 'licensing', 'scripts', 'generate_license.py')],
+    pathex=[_base_dir],
     binaries=[],
     datas=[('licensing/scripts/ed25519.py', '.')],
     hiddenimports=['ed25519'],
